@@ -4,12 +4,57 @@ A Solidity smart contract implementation for staking RARE tokens with Merkle-bas
 
 ## Architecture
 
-The contract follows the UUPS (Universal Upgradeable Proxy Standard) pattern:
+The Rare Staking contract implements a UUPS (Universal Upgradeable Proxy Standard) pattern for upgradeability, combined with a merkle-based claim system for efficient reward distribution. Here's a breakdown of the key components:
 
-- `RareStakingV1.sol`: The implementation contract containing the core logic
-- `RareStakingProxy.sol`: The proxy contract that delegates calls to the implementation
+### Core Contracts
 
-This architecture allows for future upgrades while maintaining the same contract address and state.
+- `RareStakingV1.sol`: The implementation contract containing the core logic for:
+  - Staking and unstaking RARE tokens
+  - Merkle-based reward claiming
+  - Contract upgradeability
+  - Access control
+
+- `ERC1967Proxy.sol`: The proxy contract that:
+  - Stores the contract state
+  - Delegates all calls to the implementation
+  - Enables seamless upgrades without state loss
+
+### Key Features
+
+1. **Upgradeable Architecture**
+   - UUPS proxy pattern for future upgrades
+   - State persistence across upgrades
+   - Owner-controlled upgrade mechanism
+
+2. **Staking Mechanism**
+   - Direct RARE token staking
+   - Balance tracking per address
+   - Total stake accounting
+   - Reentrancy protection
+
+3. **Reward Distribution**
+   - Merkle-based claim system
+   - Gas-efficient reward distribution
+   - Round-based claiming
+   - Duplicate claim prevention
+
+4. **Security Features**
+   - OpenZeppelin's secure contract base
+   - Reentrancy guards
+   - Access control
+   - Input validation
+
+### Contract Interactions
+```mermaid
+graph TD
+    User[User] --> |Stake/Unstake| Proxy[ERC1967Proxy]
+    User --> |Claim Rewards| Proxy
+    Proxy --> |Delegates Calls| Implementation[RareStakingV1]
+    Implementation --> |Interacts| Token[RARE Token]
+    Owner[Owner] --> |Upgrade/Admin| Proxy
+```
+
+This architecture allows for future upgrades while maintaining the same contract address and state, providing flexibility for protocol improvements and bug fixes.
 
 ## Requirements
 
