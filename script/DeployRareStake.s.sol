@@ -15,7 +15,7 @@ contract DeployRareStake is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy RareStake contract
-        RareStaking rareStake = new RareStaking(superRareToken, merkleRoot);
+        RareStaking rareStake = new RareStaking(rareToken, merkleRoot);
 
         vm.stopBroadcast();
 

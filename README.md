@@ -1,2 +1,76 @@
-# rare-staking
-Rare staking and Merkle-based claim contract with efficient reward distribution.
+# Rare Staking
+
+A Solidity smart contract implementation for staking RARE tokens with Merkle-based claim functionality and efficient reward distribution. This contract enables users to stake their RARE tokens and participate in a rewards program, with claims validated through Merkle proofs for gas-efficient distribution.
+
+## Requirements
+
+- [Foundry](https://book.getfoundry.sh/getting-started/installation) - Smart contract development toolkit
+- [Git](https://git-scm.com/downloads) - Version control
+
+## Setup
+
+1. Clone the repository and its submodules:
+```bash
+git clone https://github.com/rareprotocol/rare-staking.git
+cd rare-staking
+forge install
+```
+
+2. Create a `.env` file in the root directory with the following variables:
+```bash
+PRIVATE_KEY=your_private_key_here
+RARE_TOKEN=rare_token_contract_address
+INITIAL_MERKLE_ROOT=initial_merkle_root_hash
+```
+
+## Building
+
+To compile the contracts:
+
+```bash
+forge build
+```
+
+To run tests:
+
+```bash
+forge test
+```
+
+To run tests with gas reporting:
+
+```bash
+forge test --gas-report
+```
+
+
+## Deployment
+
+The deployment script is located in `script/DeployRareStake.s.sol`. To deploy the contract:
+
+1. Ensure your `.env` file is properly configured with:
+   - `PRIVATE_KEY`: Your deployer wallet's private key
+   - `RARE_TOKEN`: The address of the RARE token contract
+   - `INITIAL_MERKLE_ROOT`: The initial Merkle root for claims
+
+2. Run the deployment script:
+```bash
+forge script script/DeployRareStake.s.sol --rpc-url <your_rpc_url> --broadcast
+```
+
+Replace `<your_rpc_url>` with your preferred network RPC URL (e.g., Ethereum mainnet, testnet).
+
+## Project Structure
+
+- `src/`: Smart contract source files
+- `test/`: Contract test files
+- `script/`: Deployment and other scripts
+- `lib/`: Dependencies (OpenZeppelin contracts, Forge Standard Library)
+
+## Dependencies
+
+The project uses the following main dependencies:
+- OpenZeppelin Contracts
+- Forge Standard Library
+
+These are managed through Git submodules and Foundry's dependency system.
