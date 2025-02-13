@@ -66,8 +66,25 @@ The deployment script is located in `script/DeployRareStake.s.sol`. To deploy th
    - `INITIAL_MERKLE_ROOT`: The initial Merkle root for claims
 
 2. Run the deployment script:
+
+For local testing:
 ```bash
-forge script script/DeployRareStake.s.sol --rpc-url <your_rpc_url> --broadcast
+forge script script/DeployRareStake.s.sol --rpc-url http://localhost:8545 --broadcast
+```
+
+For testnet/mainnet deployment:
+```bash
+# Build and test before deployment
+forge build
+forge test
+
+# Deploy with verification
+forge script script/DeployRareStake.s.sol \
+    --rpc-url <your_rpc_url> \
+    --broadcast \
+    --verify \
+    --etherscan-api-key <YOUR_ETHERSCAN_API_KEY> \
+    -vvvv
 ```
 
 The script will:
@@ -83,7 +100,6 @@ Replace `<your_rpc_url>` with your preferred network RPC URL (e.g., Ethereum mai
 
 - `src/`: Smart contract source files
   - `RareStakingV1.sol`: Implementation contract with core logic
-  - `RareStakingProxy.sol`: UUPS proxy contract
   - `interfaces/`: Contract interfaces
 - `test/`: Contract test files
 - `script/`: Deployment and other scripts
