@@ -16,12 +16,16 @@ cd rare-staking
 forge install
 ```
 
-2. Create a `.env` file in the root directory with the following variables:
+2. Set up your environment variables:
 ```bash
-PRIVATE_KEY=your_private_key_here
-RARE_TOKEN=rare_token_contract_address
-INITIAL_MERKLE_ROOT=initial_merkle_root_hash
+cp sample.env .env
 ```
+Then edit `.env` with your configuration. The following variables are required:
+- `PRIVATE_KEY`: Your deployer wallet's private key
+- `RARE_TOKEN`: The address of the RARE token contract
+- `INITIAL_MERKLE_ROOT`: The initial Merkle root for claims
+
+See `sample.env` for all available configuration options.
 
 ## Building
 
