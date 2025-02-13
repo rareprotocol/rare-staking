@@ -3,13 +3,22 @@ pragma solidity 0.8.28;
 
 import "openzeppelin-contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
-import "openzeppelin-contracts/utils/Context.sol";
-import "openzeppelin-contracts/access/Ownable.sol";
-import "openzeppelin-contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin-contracts-upgradeable/utils/ContextUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin-contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin-contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "openzeppelin-contracts/utils/cryptography/MerkleProof.sol";
 import "./interfaces/IRareStaking.sol";
 
-contract RareStaking is IRareStaking, Context, Ownable, ReentrancyGuard {
+contract RareStakingV1 is
+    Initializable,
+    ContextUpgradeable,
+    OwnableUpgradeable,
+    UUPSUpgradeable,
+    ReentrancyGuardUpgradeable,
+    IRareStaking
+{
     using SafeERC20 for IERC20;
 
     bytes32 public override currentClaimRoot;
@@ -21,12 +30,24 @@ contract RareStaking is IRareStaking, Context, Ownable, ReentrancyGuard {
     mapping(address => uint256) public override stakedAmount;
     uint256 public override totalStaked;
 
-    constructor(
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         address superRareToken,
-        bytes32 merkleRoot
-    ) Ownable(msg.sender) {
+        bytes32 merkleRoot,
+        address initialOwner
+    ) public initializer {
         if (superRareToken == address(0)) revert ZeroTokenAddress();
         if (merkleRoot == bytes32(0)) revert EmptyMerkleRoot();
+
+        __Context_init();
+        __Ownable_init(initialOwner);
+        __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
+
         _token = IERC20(superRareToken);
         currentClaimRoot = merkleRoot;
         currentRound = 0;
@@ -112,5 +133,12 @@ contract RareStaking is IRareStaking, Context, Ownable, ReentrancyGuard {
     function updateTokenAddress(address _newToken) external override onlyOwner {
         if (_newToken == address(0)) revert ZeroTokenAddress();
         _token = IERC20(_newToken);
+    }
+
+    /// @dev Required by the OZ UUPS module
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    function upgradeTo(address newImplementation) public onlyProxy onlyOwner {
+        upgradeToAndCall(newImplementation, new bytes(0));
     }
 }

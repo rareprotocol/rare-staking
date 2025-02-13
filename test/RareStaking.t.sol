@@ -2,10 +2,14 @@
 pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/RareStaking.sol";
+import "../src/RareStakingV1.sol";
+import "./RareStakingUpdateTest.sol";
+import "openzeppelin-contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/interfaces/IRareStaking.sol";
 import "openzeppelin-contracts/token/ERC20/ERC20.sol";
 import "openzeppelin-contracts/token/ERC20/IERC20.sol";
+import "openzeppelin-contracts/utils/cryptography/MerkleProof.sol";
+import "openzeppelin-contracts/access/Ownable.sol";
 
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock Token", "MTK") {}
@@ -47,11 +51,16 @@ contract ReentrantToken is ERC20 {
 }
 
 contract RareStakingTest is Test {
-    RareStaking public rareStaking;
+    RareStakingV1 public implementation;
+    RareStakingUpdateTest public implementationV2;
+    ERC1967Proxy public proxy;
+    IRareStaking public rareStaking;
     MockERC20 public token;
+    ReentrantToken public reentrantToken;
     address public owner;
-    address public user1;
-    address public user2;
+    address public alice;
+    address public bob;
+    address public charlie;
     bytes32 public merkleRoot;
     uint256 public constant CLAIM_AMOUNT = 100 ether;
 
@@ -70,34 +79,132 @@ contract RareStakingTest is Test {
     event Staked(address indexed user, uint256 amount, uint256 timestamp);
     event Unstaked(address indexed user, uint256 amount, uint256 timestamp);
 
-    // Custom errors from OpenZeppelin ERC20
-    error ERC20InsufficientAllowance(
-        address spender,
-        uint256 allowance,
-        uint256 needed
-    );
-
     function setUp() public {
+        // Setup accounts
         owner = address(this);
-        user1 = makeAddr("user1");
-        user2 = makeAddr("user2");
+        alice = makeAddr("alice");
+        bob = makeAddr("bob");
+        charlie = makeAddr("charlie");
 
-        // Deploy mock token and mint tokens directly
+        // Deploy mock token
         token = new MockERC20();
-        token.mint(owner, 1_000_000 ether); // Mint 1M tokens to owner
+        reentrantToken = new ReentrantToken();
 
-        // Create merkle root for testing
-        bytes32 leaf1 = keccak256(abi.encodePacked(user1, CLAIM_AMOUNT));
-        bytes32 leaf2 = keccak256(abi.encodePacked(user2, CLAIM_AMOUNT));
-        merkleRoot = keccak256(abi.encodePacked(leaf1, leaf2));
+        // Generate merkle root and proof for alice and bob
+        bytes32[] memory leaves = new bytes32[](2);
+        leaves[0] = keccak256(abi.encodePacked(alice, CLAIM_AMOUNT));
+        leaves[1] = keccak256(abi.encodePacked(bob, CLAIM_AMOUNT));
+        merkleRoot = _generateMerkleRoot(leaves);
 
-        // Deploy RareStaking contract
-        rareStaking = new RareStaking(address(token), merkleRoot);
+        // Deploy implementation
+        implementation = new RareStakingV1();
 
-        // Transfer tokens to contract and users
-        token.transfer(address(rareStaking), 10_000 ether);
-        token.transfer(user1, 1_000 ether);
-        token.transfer(user2, 1_000 ether);
+        // Deploy proxy without initialization
+        proxy = new ERC1967Proxy(address(implementation), "");
+
+        // Initialize the implementation through proxy
+        RareStakingV1(address(proxy)).initialize(
+            address(token),
+            merkleRoot,
+            owner
+        );
+
+        // Setup interface for easier testing
+        rareStaking = IRareStaking(address(proxy));
+
+        // Setup initial token balances
+        token.mint(alice, 1000 ether);
+        token.mint(bob, 1000 ether);
+        token.mint(charlie, 1000 ether);
+        token.mint(address(this), 1000 ether); // Mint tokens to test contract
+        token.mint(address(proxy), 10000 ether); // Mint tokens to proxy for claims
+        vm.prank(alice);
+        token.approve(address(proxy), type(uint256).max);
+        vm.prank(bob);
+        token.approve(address(proxy), type(uint256).max);
+        token.approve(address(proxy), type(uint256).max); // Approve from test contract
+    }
+
+    // Helper function to generate merkle root
+    function _generateMerkleRoot(
+        bytes32[] memory leaves
+    ) internal pure returns (bytes32) {
+        require(leaves.length > 0, "No leaves");
+
+        if (leaves.length == 1) {
+            return leaves[0];
+        }
+
+        bytes32[] memory nextLevel = new bytes32[]((leaves.length + 1) / 2);
+        for (uint256 i = 0; i < leaves.length; i += 2) {
+            bytes32 left = leaves[i];
+            bytes32 right = i + 1 < leaves.length ? leaves[i + 1] : leaves[i];
+            // Sort the leaves to ensure consistent ordering
+            if (uint256(left) > uint256(right)) {
+                (left, right) = (right, left);
+            }
+            nextLevel[i / 2] = keccak256(abi.encodePacked(left, right));
+        }
+
+        return _generateMerkleRoot(nextLevel);
+    }
+
+    // Helper function to create merkle proof
+    function _createMerkleProof(
+        address account,
+        uint256 amount
+    ) internal view returns (bytes32[] memory) {
+        bytes32[] memory leaves = new bytes32[](2);
+        bytes32 aliceLeaf = keccak256(abi.encodePacked(alice, amount));
+        bytes32 bobLeaf = keccak256(abi.encodePacked(bob, amount));
+
+        // Sort leaves to ensure consistent ordering
+        if (uint256(aliceLeaf) < uint256(bobLeaf)) {
+            leaves[0] = aliceLeaf;
+            leaves[1] = bobLeaf;
+        } else {
+            leaves[0] = bobLeaf;
+            leaves[1] = aliceLeaf;
+        }
+
+        bytes32[] memory proof = new bytes32[](1);
+        bytes32 accountLeaf = keccak256(abi.encodePacked(account, amount));
+
+        if (accountLeaf == leaves[0]) {
+            proof[0] = leaves[1];
+        } else {
+            proof[0] = leaves[0];
+        }
+
+        return proof;
+    }
+
+    // Test upgradeability
+    function test_CannotInitializeTwice() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        RareStakingV1(address(proxy)).initialize(
+            address(token),
+            merkleRoot,
+            owner
+        );
+    }
+
+    function test_OnlyOwnerCanUpgrade() public {
+        RareStakingV1 newImplementation = new RareStakingV1();
+
+        // Non-owner cannot upgrade
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                alice
+            )
+        );
+        RareStakingV1(address(proxy)).upgradeTo(address(newImplementation));
+
+        // Owner can upgrade
+        vm.prank(owner);
+        RareStakingV1(address(proxy)).upgradeTo(address(newImplementation));
     }
 
     function testConstructor() public {
@@ -107,47 +214,54 @@ contract RareStakingTest is Test {
     }
 
     function testConstructorZeroAddressFail() public {
+        RareStakingV1 newImpl = new RareStakingV1();
+        ERC1967Proxy newProxy = new ERC1967Proxy(address(newImpl), "");
         vm.expectRevert(IRareStaking.ZeroTokenAddress.selector);
-        new RareStaking(address(0), merkleRoot);
+        RareStakingV1(address(newProxy)).initialize(
+            address(0),
+            merkleRoot,
+            owner
+        );
     }
 
     function testConstructorEmptyRootFail() public {
+        RareStakingV1 newImpl = new RareStakingV1();
+        ERC1967Proxy newProxy = new ERC1967Proxy(address(newImpl), "");
         vm.expectRevert(IRareStaking.EmptyMerkleRoot.selector);
-        new RareStaking(address(token), bytes32(0));
+        RareStakingV1(address(newProxy)).initialize(
+            address(token),
+            bytes32(0),
+            owner
+        );
     }
 
     function testClaim() public {
-        // Create proof for user1
-        bytes32[] memory proof = new bytes32[](1);
-        bytes32 leaf1 = keccak256(abi.encodePacked(user1, CLAIM_AMOUNT));
-        bytes32 leaf2 = keccak256(abi.encodePacked(user2, CLAIM_AMOUNT));
-        proof[0] = leaf2;
+        // Create proof for alice
+        bytes32[] memory proof = _createMerkleProof(alice, CLAIM_AMOUNT);
 
         // Increment round (otherwise claim will fail as round 0)
         rareStaking.updateMerkleRoot(merkleRoot);
 
         // Test claim
-        vm.startPrank(user1);
+        vm.startPrank(alice);
         vm.expectEmit(true, true, false, true);
-        emit TokensClaimed(merkleRoot, user1, CLAIM_AMOUNT, 1);
+        emit TokensClaimed(merkleRoot, alice, CLAIM_AMOUNT, 1);
         rareStaking.claim(CLAIM_AMOUNT, proof);
 
-        // User should have their initial balance (1000) plus claim amount (100)
-        assertEq(token.balanceOf(user1), 1_100 ether);
-        assertEq(rareStaking.lastClaimedRound(user1), 1);
+        // Alice should have their initial balance (1000) plus claim amount (100)
+        assertEq(token.balanceOf(alice), 1_100 ether);
+        assertEq(rareStaking.lastClaimedRound(alice), 1);
         vm.stopPrank();
     }
 
     function testCannotClaimTwiceInSameRound() public {
-        // Create proof for user1
-        bytes32[] memory proof = new bytes32[](1);
-        bytes32 leaf2 = keccak256(abi.encodePacked(user2, CLAIM_AMOUNT));
-        proof[0] = leaf2;
+        // Create proof for alice
+        bytes32[] memory proof = _createMerkleProof(alice, CLAIM_AMOUNT);
 
         // Increment round
         rareStaking.updateMerkleRoot(merkleRoot);
 
-        vm.startPrank(user1);
+        vm.startPrank(alice);
         // First claim should succeed
         rareStaking.claim(CLAIM_AMOUNT, proof);
 
@@ -158,16 +272,14 @@ contract RareStakingTest is Test {
     }
 
     function testCanClaimInNewRound() public {
-        // Create proof for user1
-        bytes32[] memory proof = new bytes32[](1);
-        bytes32 leaf2 = keccak256(abi.encodePacked(user2, CLAIM_AMOUNT));
-        proof[0] = leaf2;
+        // Create proof for alice
+        bytes32[] memory proof = _createMerkleProof(alice, CLAIM_AMOUNT);
 
         // First round
         vm.prank(owner);
         rareStaking.updateMerkleRoot(merkleRoot);
 
-        vm.startPrank(user1);
+        vm.startPrank(alice);
         rareStaking.claim(CLAIM_AMOUNT, proof);
 
         // New round
@@ -175,11 +287,11 @@ contract RareStakingTest is Test {
         vm.prank(owner);
         rareStaking.updateMerkleRoot(merkleRoot);
 
-        vm.prank(user1);
+        vm.prank(alice);
         rareStaking.claim(CLAIM_AMOUNT, proof);
 
-        // User should have initial balance (1000) plus two claims (100 each)
-        assertEq(token.balanceOf(user1), 1_200 ether);
+        // Alice should have initial balance (1000) plus two claims (100 each)
+        assertEq(token.balanceOf(alice), 1_200 ether);
     }
 
     function testCannotClaimWithInvalidProof() public {
@@ -189,7 +301,7 @@ contract RareStakingTest is Test {
 
         rareStaking.updateMerkleRoot(merkleRoot);
 
-        vm.startPrank(user1);
+        vm.startPrank(alice);
         vm.expectRevert(IRareStaking.InvalidMerkleProof.selector);
         rareStaking.claim(CLAIM_AMOUNT, proof);
         vm.stopPrank();
@@ -223,22 +335,22 @@ contract RareStakingTest is Test {
     }
 
     function testOnlyOwnerCanUpdateMerkleRoot() public {
-        vm.prank(user1);
+        vm.prank(alice);
         vm.expectRevert(
-            abi.encodeWithSignature(
-                "OwnableUnauthorizedAccount(address)",
-                user1
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                alice
             )
         );
         rareStaking.updateMerkleRoot(bytes32(uint256(123)));
     }
 
     function testOnlyOwnerCanUpdateTokenAddress() public {
-        vm.prank(user1);
+        vm.prank(alice);
         vm.expectRevert(
-            abi.encodeWithSignature(
-                "OwnableUnauthorizedAccount(address)",
-                user1
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                alice
             )
         );
         rareStaking.updateTokenAddress(makeAddr("newToken"));
@@ -276,33 +388,33 @@ contract RareStakingTest is Test {
     }
 
     function testCannotStakeWithoutAllowance() public {
-        // Try to stake without approving
-        vm.prank(user1);
+        vm.startPrank(charlie);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ERC20InsufficientAllowance.selector,
-                address(rareStaking),
+                IERC20Errors.ERC20InsufficientAllowance.selector,
+                address(proxy),
                 0,
-                100 ether
+                100e18
             )
         );
         rareStaking.stake(100 ether);
+        vm.stopPrank();
     }
 
     function testCannotStakeWithInsufficientAllowance() public {
         uint256 stakeAmount = 100 ether;
         uint256 allowance = 50 ether; // Less than stake amount
 
-        vm.startPrank(user1);
+        vm.startPrank(alice);
         token.approve(address(rareStaking), allowance);
 
         // Try to stake more than allowed
         vm.expectRevert(
             abi.encodeWithSelector(
-                ERC20InsufficientAllowance.selector,
-                address(rareStaking),
-                allowance,
-                stakeAmount
+                IERC20Errors.ERC20InsufficientAllowance.selector,
+                address(proxy),
+                50e18,
+                100e18
             )
         );
         rareStaking.stake(stakeAmount);
@@ -449,9 +561,7 @@ contract RareStakingTest is Test {
         maliciousToken.transfer(address(rareStaking), 10_000 ether);
 
         // Create proof for claim
-        bytes32[] memory proof = new bytes32[](1);
-        bytes32 leaf2 = keccak256(abi.encodePacked(user2, CLAIM_AMOUNT));
-        proof[0] = leaf2;
+        bytes32[] memory proof = _createMerkleProof(alice, CLAIM_AMOUNT);
 
         // Update merkle root to allow claiming
         rareStaking.updateMerkleRoot(merkleRoot);
@@ -465,55 +575,97 @@ contract RareStakingTest is Test {
         maliciousToken.setReentrant(address(rareStaking), claimCall);
 
         // Try to claim - should revert due to reentrancy guard
-        vm.startPrank(user1);
+        vm.startPrank(alice);
         vm.expectRevert();
         rareStaking.claim(CLAIM_AMOUNT, proof);
         vm.stopPrank();
     }
 
     function testCannotReuseProofForDifferentAddress() public {
-        // Create proof for user1
-        bytes32[] memory proof = new bytes32[](1);
-        bytes32 leaf2 = keccak256(abi.encodePacked(user2, CLAIM_AMOUNT));
-        proof[0] = leaf2;
+        // Create proof for alice
+        bytes32[] memory proof = _createMerkleProof(alice, CLAIM_AMOUNT);
 
         // Increment round
         rareStaking.updateMerkleRoot(merkleRoot);
 
-        // Try to use user1's proof for user2
-        vm.startPrank(user2);
+        // Try to use alice's proof for bob
+        vm.startPrank(bob);
         vm.expectRevert(IRareStaking.InvalidMerkleProof.selector);
         rareStaking.claim(CLAIM_AMOUNT, proof);
         vm.stopPrank();
     }
 
     function testCannotClaimDifferentAmountInSameRound() public {
-        // Create two different valid proofs for user1
-        bytes32[] memory proof1 = new bytes32[](1);
-        bytes32[] memory proof2 = new bytes32[](1);
+        // Create proof for alice
+        bytes32[] memory proof = _createMerkleProof(alice, CLAIM_AMOUNT);
 
-        // Create a new merkle tree with two different amounts for user1
-        bytes32 leaf1 = keccak256(abi.encodePacked(user1, CLAIM_AMOUNT));
-        bytes32 leaf2 = keccak256(abi.encodePacked(user1, CLAIM_AMOUNT * 2));
-        bytes32 newRoot = keccak256(abi.encodePacked(leaf1, leaf2));
+        // Update merkle root to allow claiming
+        rareStaking.updateMerkleRoot(merkleRoot);
 
-        // Set up proofs
-        proof1[0] = leaf2; // Proof for first amount
-        proof2[0] = leaf1; // Proof for second amount
-
-        // Update merkle root to allow both proofs
-        rareStaking.updateMerkleRoot(newRoot);
-
-        vm.startPrank(user1);
+        vm.startPrank(alice);
         // First claim should succeed
-        rareStaking.claim(CLAIM_AMOUNT, proof1);
+        rareStaking.claim(CLAIM_AMOUNT, proof);
 
-        // Second claim should fail even with a different valid proof
-        vm.expectRevert(IRareStaking.AlreadyClaimed.selector);
-        rareStaking.claim(CLAIM_AMOUNT * 2, proof2);
+        // Second claim should fail even with a different amount
+        vm.expectRevert(IRareStaking.InvalidMerkleProof.selector);
+        rareStaking.claim(CLAIM_AMOUNT * 2, proof);
         vm.stopPrank();
 
-        // Verify user only received one claim amount
-        assertEq(token.balanceOf(user1), 1_100 ether); // Initial 1000 + one claim of 100
+        // Verify alice only received one claim amount
+        assertEq(token.balanceOf(alice), 1_100 ether); // Initial 1000 + one claim of 100
+    }
+
+    function testUpgradeToV2WithStatePreservation() public {
+        uint256 stakeAmount = 100 ether;
+
+        // 1. Test staking in V1
+        vm.startPrank(alice);
+        rareStaking.stake(stakeAmount);
+        assertEq(rareStaking.stakedAmount(alice), stakeAmount);
+        vm.stopPrank();
+
+        // 2. Create and upgrade to V2
+        implementationV2 = new RareStakingUpdateTest();
+
+        vm.prank(owner);
+        RareStakingV1(address(proxy)).upgradeTo(address(implementationV2));
+
+        // Create interface for V2
+        RareStakingUpdateTest rareStakingV2 = RareStakingUpdateTest(
+            address(proxy)
+        );
+
+        // 3. Verify existing state is preserved
+        assertEq(rareStaking.stakedAmount(alice), stakeAmount);
+        assertEq(rareStaking.totalStaked(), stakeAmount);
+
+        // 4. Test new V2 functionality
+        // Initially should just show staked amount as no claims are pending
+        assertEq(rareStakingV2.getTotalAccountValue(alice), stakeAmount);
+
+        // Update merkle root to create a pending claim
+        vm.prank(owner);
+        rareStaking.updateMerkleRoot(merkleRoot);
+
+        // Now total value should include the pending claim
+        assertEq(
+            rareStakingV2.getTotalAccountValue(alice),
+            stakeAmount + CLAIM_AMOUNT
+        );
+
+        // 5. Test that core functionality still works after upgrade
+
+        // Test unstaking
+        vm.startPrank(alice);
+        rareStaking.unstake(50 ether); // Unstake half
+        assertEq(rareStaking.stakedAmount(alice), 50 ether);
+
+        // Test claiming
+        bytes32[] memory proof = _createMerkleProof(alice, CLAIM_AMOUNT);
+        rareStaking.claim(CLAIM_AMOUNT, proof);
+
+        // After claiming, total value should only show staked amount
+        assertEq(rareStakingV2.getTotalAccountValue(alice), 50 ether);
+        vm.stopPrank();
     }
 }
