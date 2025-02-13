@@ -8,7 +8,7 @@ contract DeployRareStake is Script {
     function run() external {
         // Get deployment parameters from environment
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address superRareToken = vm.envAddress("SUPER_RARE_TOKEN");
+        address rareToken = vm.envAddress("RARE_TOKEN");
         bytes32 merkleRoot = bytes32(vm.envBytes32("INITIAL_MERKLE_ROOT"));
 
         // Start broadcasting transactions
