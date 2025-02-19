@@ -78,6 +78,12 @@ contract RareStakingTest is Test {
     );
     event Staked(address indexed user, uint256 amount, uint256 timestamp);
     event Unstaked(address indexed user, uint256 amount, uint256 timestamp);
+    event DelegationUpdated(
+        address indexed delegator,
+        address indexed delegatee,
+        uint256 amount,
+        uint256 timestamp
+    );
 
     function setUp() public {
         // Setup accounts
@@ -666,6 +672,123 @@ contract RareStakingTest is Test {
 
         // After claiming, total value should only show staked amount
         assertEq(rareStakingV2.getTotalAccountValue(alice), 50 ether);
+        vm.stopPrank();
+    }
+
+    // Delegation Tests
+    function testBasicDelegation() public {
+        uint256 STAKE_AMOUNT = 100 ether;
+        uint256 DELEGATE_AMOUNT = 50 ether;
+
+        vm.startPrank(alice);
+        rareStaking.stake(STAKE_AMOUNT);
+
+        vm.expectEmit(true, true, false, true);
+        emit DelegationUpdated(alice, bob, DELEGATE_AMOUNT, block.timestamp);
+        rareStaking.delegate(bob, DELEGATE_AMOUNT);
+
+        assertEq(rareStaking.getDelegatedAmount(alice, bob), DELEGATE_AMOUNT);
+        assertEq(rareStaking.getTotalDelegatedToAddress(bob), DELEGATE_AMOUNT);
+        vm.stopPrank();
+    }
+
+    function testCannotDelegateMoreThanStaked() public {
+        uint256 STAKE_AMOUNT = 100 ether;
+        uint256 DELEGATE_AMOUNT = 150 ether;
+
+        vm.startPrank(alice);
+        rareStaking.stake(STAKE_AMOUNT);
+
+        vm.expectRevert(IRareStaking.InsufficientStakedBalance.selector);
+        rareStaking.delegate(bob, DELEGATE_AMOUNT);
+        vm.stopPrank();
+    }
+
+    function testCannotDelegateToSelf() public {
+        uint256 STAKE_AMOUNT = 100 ether;
+
+        vm.startPrank(alice);
+        rareStaking.stake(STAKE_AMOUNT);
+
+        vm.expectRevert(IRareStaking.CannotDelegateToSelf.selector);
+        rareStaking.delegate(alice, STAKE_AMOUNT);
+        vm.stopPrank();
+    }
+
+    function testCannotDelegateZeroAmount() public {
+        uint256 STAKE_AMOUNT = 100 ether;
+
+        vm.startPrank(alice);
+        rareStaking.stake(STAKE_AMOUNT);
+
+        vm.expectRevert(IRareStaking.ZeroStakeAmount.selector);
+        rareStaking.delegate(bob, 0);
+        vm.stopPrank();
+    }
+
+    function testUpdateDelegation() public {
+        uint256 STAKE_AMOUNT = 100 ether;
+        uint256 INITIAL_DELEGATE = 50 ether;
+        uint256 UPDATED_DELEGATE = 75 ether;
+
+        vm.startPrank(alice);
+        rareStaking.stake(STAKE_AMOUNT);
+
+        // Initial delegation
+        rareStaking.delegate(bob, INITIAL_DELEGATE);
+        assertEq(rareStaking.getDelegatedAmount(alice, bob), INITIAL_DELEGATE);
+        assertEq(rareStaking.getTotalDelegatedToAddress(bob), INITIAL_DELEGATE);
+
+        // Update delegation
+        vm.expectEmit(true, true, false, true);
+        emit DelegationUpdated(alice, bob, UPDATED_DELEGATE, block.timestamp);
+        rareStaking.delegate(bob, UPDATED_DELEGATE);
+
+        assertEq(rareStaking.getDelegatedAmount(alice, bob), UPDATED_DELEGATE);
+        assertEq(rareStaking.getTotalDelegatedToAddress(bob), UPDATED_DELEGATE);
+        vm.stopPrank();
+    }
+
+    function testMultipleDelegators() public {
+        uint256 STAKE_AMOUNT = 100 ether;
+        uint256 ALICE_DELEGATE = 50 ether;
+        uint256 BOB_DELEGATE = 30 ether;
+
+        // Alice delegates
+        vm.startPrank(alice);
+        rareStaking.stake(STAKE_AMOUNT);
+        rareStaking.delegate(charlie, ALICE_DELEGATE);
+        vm.stopPrank();
+
+        // Bob delegates
+        vm.startPrank(bob);
+        rareStaking.stake(STAKE_AMOUNT);
+        rareStaking.delegate(charlie, BOB_DELEGATE);
+        vm.stopPrank();
+
+        assertEq(
+            rareStaking.getDelegatedAmount(alice, charlie),
+            ALICE_DELEGATE
+        );
+        assertEq(rareStaking.getDelegatedAmount(bob, charlie), BOB_DELEGATE);
+        assertEq(
+            rareStaking.getTotalDelegatedToAddress(charlie),
+            ALICE_DELEGATE + BOB_DELEGATE
+        );
+    }
+
+    function testDelegationAfterUnstake() public {
+        uint256 STAKE_AMOUNT = 100 ether;
+        uint256 DELEGATE_AMOUNT = 50 ether;
+        uint256 UNSTAKE_AMOUNT = 75 ether;
+
+        vm.startPrank(alice);
+        rareStaking.stake(STAKE_AMOUNT);
+        rareStaking.delegate(bob, DELEGATE_AMOUNT);
+
+        // Unstake more than remaining non-delegated amount
+        vm.expectRevert(IRareStaking.InsufficientStakedBalance.selector);
+        rareStaking.unstake(UNSTAKE_AMOUNT);
         vm.stopPrank();
     }
 }

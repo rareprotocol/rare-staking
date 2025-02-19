@@ -12,6 +12,8 @@ interface IRareStaking {
     error InsufficientStakedBalance();
     error InvalidMerkleProof();
     error AlreadyClaimed();
+    error InsufficientDelegationBalance();
+    error CannotDelegateToSelf();
 
     // Events
     event TokensClaimed(
@@ -31,6 +33,13 @@ interface IRareStaking {
 
     event Unstaked(address indexed staker, uint256 amount, uint256 timestamp);
 
+    event DelegationUpdated(
+        address indexed delegator,
+        address indexed delegatee,
+        uint256 amount,
+        uint256 timestamp
+    );
+
     // View functions
     function currentClaimRoot() external view returns (bytes32);
     function token() external view returns (address);
@@ -39,6 +48,13 @@ interface IRareStaking {
     function stakedAmount(address user) external view returns (uint256);
     function totalStaked() external view returns (uint256);
     function getStakedBalance(address staker) external view returns (uint256);
+    function getDelegatedAmount(
+        address delegator,
+        address delegatee
+    ) external view returns (uint256);
+    function getTotalDelegatedToAddress(
+        address delegatee
+    ) external view returns (uint256);
     function verifyEntitled(
         address recipient,
         uint256 value,
@@ -51,4 +67,5 @@ interface IRareStaking {
     function claim(uint256 amount, bytes32[] calldata proof) external;
     function updateMerkleRoot(bytes32 newRoot) external;
     function updateTokenAddress(address _token) external;
+    function delegate(address delegatee, uint256 amount) external;
 }

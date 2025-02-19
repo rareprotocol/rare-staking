@@ -30,6 +30,11 @@ contract RareStakingV1 is
     mapping(address => uint256) public override stakedAmount;
     uint256 public override totalStaked;
 
+    // Delegation state
+    mapping(address => mapping(address => uint256)) private _delegatedAmount;
+    mapping(address => uint256) private _totalDelegatedToAddress;
+    mapping(address => uint256) private _totalUserDelegations;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -70,21 +75,61 @@ contract RareStakingV1 is
 
     function unstake(uint256 amount) external override nonReentrant {
         if (amount == 0) revert ZeroUnstakeAmount();
-        if (stakedAmount[_msgSender()] < amount)
+        address sender = _msgSender();
+        uint256 senderStaked = stakedAmount[sender];
+        if (senderStaked < amount) revert InsufficientStakedBalance();
+
+        // Cannot unstake if it would leave insufficient tokens for existing delegations
+        uint256 totalDelegated = _totalUserDelegations[sender];
+        if (senderStaked - amount < totalDelegated)
             revert InsufficientStakedBalance();
 
-        stakedAmount[_msgSender()] -= amount;
+        stakedAmount[sender] -= amount;
         totalStaked -= amount;
 
-        _token.safeTransfer(_msgSender(), amount);
+        _token.safeTransfer(sender, amount);
 
-        emit Unstaked(_msgSender(), amount, block.timestamp);
+        emit Unstaked(sender, amount, block.timestamp);
     }
 
     function getStakedBalance(
         address staker
     ) external view override returns (uint256) {
         return stakedAmount[staker];
+    }
+
+    function getDelegatedAmount(
+        address delegator,
+        address delegatee
+    ) external view override returns (uint256) {
+        return _delegatedAmount[delegator][delegatee];
+    }
+
+    function getTotalDelegatedToAddress(
+        address delegatee
+    ) external view override returns (uint256) {
+        return _totalDelegatedToAddress[delegatee];
+    }
+
+    function delegate(address delegatee, uint256 amount) external override {
+        if (delegatee == _msgSender()) revert CannotDelegateToSelf();
+        if (amount == 0) revert ZeroStakeAmount();
+        address sender = _msgSender();
+        if (stakedAmount[sender] < amount) revert InsufficientStakedBalance();
+
+        // Update previous delegation if it exists
+        uint256 currentDelegation = _delegatedAmount[sender][delegatee];
+        _totalDelegatedToAddress[delegatee] =
+            _totalDelegatedToAddress[delegatee] -
+            currentDelegation +
+            amount;
+        _delegatedAmount[sender][delegatee] = amount;
+        _totalUserDelegations[sender] =
+            _totalUserDelegations[sender] -
+            currentDelegation +
+            amount;
+
+        emit DelegationUpdated(sender, delegatee, amount, block.timestamp);
     }
 
     function claim(
