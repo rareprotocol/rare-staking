@@ -55,7 +55,7 @@ contract RareStakingV1 is
 
         _token = IERC20(superRareToken);
         currentClaimRoot = merkleRoot;
-        currentRound = 0;
+        currentRound = 1;
         emit NewClaimRootAdded(merkleRoot, currentRound, block.timestamp);
     }
 
