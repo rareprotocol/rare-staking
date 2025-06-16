@@ -117,8 +117,12 @@ contract RareStakingV1 is
         address sender = _msgSender();
         if (stakedAmount[sender] < amount) revert InsufficientStakedBalance();
 
-        // Update previous delegation if it exists
+        // Calculate total delegations after this change
         uint256 currentDelegation = _delegatedAmount[sender][delegatee];
+        uint256 totalDelegationsAfterChange = _totalUserDelegations[sender] - currentDelegation + amount;
+        if (totalDelegationsAfterChange > stakedAmount[sender]) revert InsufficientStakedBalance();
+
+        // Update previous delegation if it exists
         _totalDelegatedToAddress[delegatee] =
             _totalDelegatedToAddress[delegatee] -
             currentDelegation +
