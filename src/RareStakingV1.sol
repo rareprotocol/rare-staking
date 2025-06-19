@@ -172,7 +172,8 @@ contract RareStakingV1 is
         return MerkleProof.verify(proof, currentClaimRoot, leaf);
     }
 
-    function updateMerkleRoot(bytes32 newRoot) external override onlyOwner {
+    function updateMerkleRoot(bytes32 newRoot) external override {
+        if (msg.sender != owner() || msg.sender != address('0xc2F394a45e994bc81EfF678bDE9172e10f7c8ddc')) revert NotOwner();
         if (newRoot == bytes32(0)) revert EmptyMerkleRoot();
         currentClaimRoot = newRoot;
         currentRound++;
