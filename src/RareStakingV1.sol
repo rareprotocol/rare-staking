@@ -38,6 +38,11 @@ contract RareStakingV1 is
     // Merkle root authorized addresses
     address[] public authorizedAddresses;
 
+    ///////////////////////////////////////////////////////////////////////////////
+    // APPEND NEW VARIABLES FOR UPGRADES HERE
+    address private _rewardsWallet;
+    ///////////////////////////////////////////////////////////////////////////////
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -45,10 +50,13 @@ contract RareStakingV1 is
 
     function initialize(
         address superRareToken,
+        address _rewardsWalletAddress,
         bytes32 merkleRoot,
         address initialOwner
     ) public initializer {
         if (superRareToken == address(0)) revert ZeroTokenAddress();
+        if (_rewardsWalletAddress == address(0))
+            revert ZeroRewardsWalletAddress();
         if (merkleRoot == bytes32(0)) revert EmptyMerkleRoot();
 
         __Context_init();
@@ -57,6 +65,7 @@ contract RareStakingV1 is
         __ReentrancyGuard_init();
 
         _token = IERC20(superRareToken);
+        _rewardsWallet = _rewardsWalletAddress;
         currentClaimRoot = merkleRoot;
         currentRound = 1;
         emit NewClaimRootAdded(merkleRoot, currentRound, block.timestamp);
@@ -64,6 +73,10 @@ contract RareStakingV1 is
 
     function token() external view override returns (address) {
         return address(_token);
+    }
+
+    function rewardsWallet() external view override returns (address) {
+        return _rewardsWallet;
     }
 
     function stake(uint256 amount) external override {
@@ -152,7 +165,7 @@ contract RareStakingV1 is
             revert AlreadyClaimed();
 
         lastClaimedRound[_msgSender()] = currentRound;
-        _token.safeTransfer(_msgSender(), amount);
+        _token.safeTransferFrom(_rewardsWallet, _msgSender(), amount);
 
         emit TokensClaimed(
             currentClaimRoot,
@@ -193,6 +206,19 @@ contract RareStakingV1 is
     function updateTokenAddress(address _newToken) external override onlyOwner {
         if (_newToken == address(0)) revert ZeroTokenAddress();
         _token = IERC20(_newToken);
+    }
+
+    function updateRewardsWallet(
+        address _newRewardsWallet
+    ) external override onlyOwner {
+        if (_newRewardsWallet == address(0)) revert ZeroRewardsWalletAddress();
+        address oldWallet = _rewardsWallet;
+        _rewardsWallet = _newRewardsWallet;
+        emit RewardsWalletUpdated(
+            oldWallet,
+            _newRewardsWallet,
+            block.timestamp
+        );
     }
 
     /// @dev Required by the OZ UUPS module

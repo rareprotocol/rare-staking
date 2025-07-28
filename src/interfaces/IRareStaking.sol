@@ -6,6 +6,7 @@ import "openzeppelin-contracts/token/ERC20/IERC20.sol";
 interface IRareStaking {
     // Custom errors
     error ZeroTokenAddress();
+    error ZeroRewardsWalletAddress();
     error NotAuthorized();
     error EmptyMerkleRoot();
     error ZeroStakeAmount();
@@ -41,9 +42,16 @@ interface IRareStaking {
         uint256 timestamp
     );
 
+    event RewardsWalletUpdated(
+        address indexed oldWallet,
+        address indexed newWallet,
+        uint256 timestamp
+    );
+
     // View functions
     function currentClaimRoot() external view returns (bytes32);
     function token() external view returns (address);
+    function rewardsWallet() external view returns (address);
     function currentRound() external view returns (uint256);
     function lastClaimedRound(address user) external view returns (uint256);
     function stakedAmount(address user) external view returns (uint256);
@@ -68,5 +76,6 @@ interface IRareStaking {
     function claim(uint256 amount, bytes32[] calldata proof) external;
     function updateMerkleRoot(bytes32 newRoot) external;
     function updateTokenAddress(address _token) external;
+    function updateRewardsWallet(address _rewardsWallet) external;
     function delegate(address delegatee, uint256 amount) external;
 }

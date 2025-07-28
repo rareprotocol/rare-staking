@@ -61,6 +61,7 @@ contract RareStakingTest is Test {
     address public alice;
     address public bob;
     address public charlie;
+    address public rewardsWallet;
     bytes32 public merkleRoot;
     uint256 public constant CLAIM_AMOUNT = 100 ether;
 
@@ -84,6 +85,11 @@ contract RareStakingTest is Test {
         uint256 amount,
         uint256 timestamp
     );
+    event RewardsWalletUpdated(
+        address indexed oldWallet,
+        address indexed newWallet,
+        uint256 timestamp
+    );
 
     function setUp() public {
         // Setup accounts
@@ -91,6 +97,7 @@ contract RareStakingTest is Test {
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         charlie = makeAddr("charlie");
+        rewardsWallet = makeAddr("rewardsWallet");
 
         // Deploy mock token
         token = new MockERC20();
@@ -111,6 +118,7 @@ contract RareStakingTest is Test {
         // Initialize the implementation through proxy
         RareStakingV1(address(proxy)).initialize(
             address(token),
+            rewardsWallet,
             merkleRoot,
             owner
         );
@@ -123,12 +131,18 @@ contract RareStakingTest is Test {
         token.mint(bob, 1000 ether);
         token.mint(charlie, 1000 ether);
         token.mint(address(this), 1000 ether); // Mint tokens to test contract
-        token.mint(address(proxy), 10000 ether); // Mint tokens to proxy for claims
+        token.mint(rewardsWallet, 10000 ether); // Mint tokens to rewards wallet for claims
+
+        // Set up approvals for staking
         vm.prank(alice);
         token.approve(address(proxy), type(uint256).max);
         vm.prank(bob);
         token.approve(address(proxy), type(uint256).max);
         token.approve(address(proxy), type(uint256).max); // Approve from test contract
+
+        // Set up rewards wallet approval for claims
+        vm.prank(rewardsWallet);
+        token.approve(address(proxy), type(uint256).max);
     }
 
     // Helper function to generate merkle root
@@ -190,6 +204,7 @@ contract RareStakingTest is Test {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
         RareStakingV1(address(proxy)).initialize(
             address(token),
+            rewardsWallet,
             merkleRoot,
             owner
         );
@@ -225,6 +240,7 @@ contract RareStakingTest is Test {
         vm.expectRevert(IRareStaking.ZeroTokenAddress.selector);
         RareStakingV1(address(newProxy)).initialize(
             address(0),
+            rewardsWallet,
             merkleRoot,
             owner
         );
@@ -236,8 +252,74 @@ contract RareStakingTest is Test {
         vm.expectRevert(IRareStaking.EmptyMerkleRoot.selector);
         RareStakingV1(address(newProxy)).initialize(
             address(token),
+            rewardsWallet,
             bytes32(0),
             owner
+        );
+    }
+
+    function testConstructorZeroRewardsWalletFail() public {
+        RareStakingV1 newImpl = new RareStakingV1();
+        ERC1967Proxy newProxy = new ERC1967Proxy(address(newImpl), "");
+        vm.expectRevert(IRareStaking.ZeroRewardsWalletAddress.selector);
+        RareStakingV1(address(newProxy)).initialize(
+            address(token),
+            address(0),
+            merkleRoot,
+            owner
+        );
+    }
+
+    function testRewardsWalletFunctionality() public {
+        // Test getter function
+        assertEq(rareStaking.rewardsWallet(), rewardsWallet);
+
+        // Test updating rewards wallet
+        address newRewardsWallet = makeAddr("newRewardsWallet");
+
+        // Only owner can update
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                alice
+            )
+        );
+        rareStaking.updateRewardsWallet(newRewardsWallet);
+
+        // Cannot set to zero address
+        vm.expectRevert(IRareStaking.ZeroRewardsWalletAddress.selector);
+        rareStaking.updateRewardsWallet(address(0));
+
+        // Successful update
+        vm.expectEmit(true, true, false, true);
+        emit RewardsWalletUpdated(
+            rewardsWallet,
+            newRewardsWallet,
+            block.timestamp
+        );
+        rareStaking.updateRewardsWallet(newRewardsWallet);
+        assertEq(rareStaking.rewardsWallet(), newRewardsWallet);
+
+        // Set up new rewards wallet with tokens and approval
+        token.mint(newRewardsWallet, 5000 ether);
+        vm.prank(newRewardsWallet);
+        token.approve(address(proxy), type(uint256).max);
+
+        // Test claim works with new rewards wallet
+        uint256 initialBalance = token.balanceOf(alice);
+        uint256 initialRewardsBalance = token.balanceOf(newRewardsWallet);
+
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = keccak256(abi.encodePacked(bob, CLAIM_AMOUNT));
+
+        vm.prank(alice);
+        rareStaking.claim(CLAIM_AMOUNT, proof);
+
+        assertEq(token.balanceOf(alice), initialBalance + CLAIM_AMOUNT);
+        assertEq(
+            token.balanceOf(newRewardsWallet),
+            initialRewardsBalance - CLAIM_AMOUNT
         );
     }
 
