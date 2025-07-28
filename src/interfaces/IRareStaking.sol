@@ -6,6 +6,7 @@ import "openzeppelin-contracts/token/ERC20/IERC20.sol";
 interface IRareStaking {
     // Custom errors
     error ZeroTokenAddress();
+    error NotAuthorized();
     error EmptyMerkleRoot();
     error ZeroStakeAmount();
     error ZeroUnstakeAmount();

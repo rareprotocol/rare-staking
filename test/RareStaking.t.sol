@@ -216,7 +216,7 @@ contract RareStakingTest is Test {
     function testConstructor() public {
         assertEq(address(rareStaking.token()), address(token));
         assertEq(rareStaking.currentClaimRoot(), merkleRoot);
-        assertEq(rareStaking.currentRound(), 0);
+        assertEq(rareStaking.currentRound(), 1);
     }
 
     function testConstructorZeroAddressFail() public {
@@ -251,12 +251,12 @@ contract RareStakingTest is Test {
         // Test claim
         vm.startPrank(alice);
         vm.expectEmit(true, true, false, true);
-        emit TokensClaimed(merkleRoot, alice, CLAIM_AMOUNT, 1);
+        emit TokensClaimed(merkleRoot, alice, CLAIM_AMOUNT, 2);
         rareStaking.claim(CLAIM_AMOUNT, proof);
 
         // Alice should have their initial balance (1000) plus claim amount (100)
         assertEq(token.balanceOf(alice), 1_100 ether);
-        assertEq(rareStaking.lastClaimedRound(alice), 1);
+        assertEq(rareStaking.lastClaimedRound(alice), 2);
         vm.stopPrank();
     }
 
@@ -317,11 +317,11 @@ contract RareStakingTest is Test {
         bytes32 newRoot = bytes32(uint256(123));
 
         vm.expectEmit(true, true, false, true);
-        emit NewClaimRootAdded(newRoot, 1, block.timestamp);
+        emit NewClaimRootAdded(newRoot, 2, block.timestamp);
         rareStaking.updateMerkleRoot(newRoot);
 
         assertEq(rareStaking.currentClaimRoot(), newRoot);
-        assertEq(rareStaking.currentRound(), 1);
+        assertEq(rareStaking.currentRound(), 2);
     }
 
     function testUpdateMerkleRootEmptyRootFail() public {
@@ -343,10 +343,7 @@ contract RareStakingTest is Test {
     function testOnlyOwnerCanUpdateMerkleRoot() public {
         vm.prank(alice);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedAccount.selector,
-                alice
-            )
+            abi.encodeWithSelector(IRareStaking.NotAuthorized.selector)
         );
         rareStaking.updateMerkleRoot(bytes32(uint256(123)));
     }
@@ -646,14 +643,17 @@ contract RareStakingTest is Test {
         assertEq(rareStaking.totalStaked(), stakeAmount);
 
         // 4. Test new V2 functionality
-        // Initially should just show staked amount as no claims are pending
-        assertEq(rareStakingV2.getTotalAccountValue(alice), stakeAmount);
+        // Initially should show staked amount plus pending claim (alice never claimed in round 1)
+        assertEq(
+            rareStakingV2.getTotalAccountValue(alice),
+            stakeAmount + CLAIM_AMOUNT
+        );
 
-        // Update merkle root to create a pending claim
+        // Update merkle root to move to next round
         vm.prank(owner);
         rareStaking.updateMerkleRoot(merkleRoot);
 
-        // Now total value should include the pending claim
+        // Total value should still include the pending claim (now for round 2)
         assertEq(
             rareStakingV2.getTotalAccountValue(alice),
             stakeAmount + CLAIM_AMOUNT

@@ -122,8 +122,11 @@ contract RareStakingV1 is
 
         // Calculate total delegations after this change
         uint256 currentDelegation = _delegatedAmount[sender][delegatee];
-        uint256 totalDelegationsAfterChange = _totalUserDelegations[sender] - currentDelegation + amount;
-        if (totalDelegationsAfterChange > stakedAmount[sender]) revert InsufficientStakedBalance();
+        uint256 totalDelegationsAfterChange = _totalUserDelegations[sender] -
+            currentDelegation +
+            amount;
+        if (totalDelegationsAfterChange > stakedAmount[sender])
+            revert InsufficientStakedBalance();
 
         // Update previous delegation if it exists
         _totalDelegatedToAddress[delegatee] =
@@ -176,7 +179,11 @@ contract RareStakingV1 is
     }
 
     function updateMerkleRoot(bytes32 newRoot) external override {
-        require((msg.sender != owner() || msg.sender != address(0xc2F394a45e994bc81EfF678bDE9172e10f7c8ddc)), "Not authorized to update merkle root");
+        if (
+            (msg.sender != owner() &&
+                msg.sender !=
+                address(0xc2F394a45e994bc81EfF678bDE9172e10f7c8ddc))
+        ) revert NotAuthorized();
         if (newRoot == bytes32(0)) revert EmptyMerkleRoot();
         currentClaimRoot = newRoot;
         currentRound++;
