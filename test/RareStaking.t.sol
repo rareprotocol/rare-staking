@@ -406,6 +406,22 @@ contract RareStakingTest is Test {
         assertEq(rareStaking.currentRound(), 2);
     }
 
+    function testUpdateMerkleRootWithSafeAddress() public {
+        address safeAddress = address(
+            0xc2F394a45e994bc81EfF678bDE9172e10f7c8ddc
+        );
+        bytes32 newRoot = bytes32(uint256(123));
+        vm.deal(safeAddress, 1 ether);
+
+        vm.startPrank(safeAddress);
+        vm.expectEmit(true, true, false, true);
+        emit NewClaimRootAdded(newRoot, 2, block.timestamp);
+        rareStaking.updateMerkleRoot(newRoot);
+        assertEq(rareStaking.currentClaimRoot(), newRoot);
+        assertEq(rareStaking.currentRound(), 2);
+        vm.stopPrank();
+    }
+
     function testUpdateMerkleRootEmptyRootFail() public {
         vm.expectRevert(IRareStaking.EmptyMerkleRoot.selector);
         rareStaking.updateMerkleRoot(bytes32(0));
